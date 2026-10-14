@@ -1,13 +1,10 @@
-"use client";
-
 /**
  * Decides whether two captures show the same card, using ORB keypoints and a
  * RANSAC homography. Robust to angle, lighting and blur; distinct cards (different
  * art and text) share few geometrically consistent matches even with the same frame.
+ * No DOM access: runs in the detector worker or on the main thread.
  */
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type CV = any;
+import type { CV } from "./opencv";
 
 export type CardFeatures = {
   /** Keypoint coordinates, flattened [x0, y0, x1, y1, ...]. */
@@ -38,19 +35,17 @@ function fromBase64(b64: string): Uint8Array {
   return bytes;
 }
 
-export function extractFeatures(cv: CV, card: HTMLCanvasElement): CardFeatures {
-  const small = document.createElement("canvas");
-  small.width = FEATURE_WIDTH;
-  small.height = Math.round((card.height / card.width) * FEATURE_WIDTH);
-  small.getContext("2d")!.drawImage(card, 0, 0, small.width, small.height);
-
-  const src = cv.imread(small);
+export function extractFeatures(cv: CV, card: ImageData): CardFeatures {
+  const full = cv.matFromImageData(card);
+  const src = new cv.Mat();
   const gray = new cv.Mat();
   const noMask = new cv.Mat();
   const orb = new cv.ORB(ORB_FEATURES);
   const keypoints = new cv.KeyPointVector();
   const descriptors = new cv.Mat();
   try {
+    const height = Math.round((card.height / card.width) * FEATURE_WIDTH);
+    cv.resize(full, src, new cv.Size(FEATURE_WIDTH, height), 0, 0, cv.INTER_AREA);
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     orb.detectAndCompute(gray, noMask, keypoints, descriptors);
     const points: number[] = [];
@@ -60,6 +55,7 @@ export function extractFeatures(cv: CV, card: HTMLCanvasElement): CardFeatures {
     }
     return { points, descriptors: toBase64(new Uint8Array(descriptors.data)), rows: descriptors.rows };
   } finally {
+    full.delete();
     src.delete();
     gray.delete();
     noMask.delete();

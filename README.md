@@ -4,7 +4,7 @@ Point a laptop or phone camera at a trading card to identify the game and read t
 
 ## How it works
 
-1. **In-browser detection (OpenCV.js):** finds the card's outline in the live feed, waits until it's held steady, then perspective-corrects the card into a flat 630×880 crop.
+1. **In-browser detection (OpenCV.js in a Web Worker):** finds the card's outline in the live feed, waits until it's held steady, then perspective-corrects the sharpest of the last few frames into a flat 630×880 crop. Running in a worker keeps the camera view and overlay smooth. OpenCV is served from `/vendor` (copied from `node_modules` before `dev`/`build`) with long-lived cache headers.
 2. **Reading (Claude, `claude-opus-5-5`):** the crop is read with structured output: game, title, subtitle, set code, collector number, and a best guess at the set from its symbol. The fixed prompt is prompt-cached.
 3. **Retrieval (the RAG step, `lib/catalog/`):** the reading is matched against real catalog cards.
    - Magic: Scryfall finds the exact printing from set code + number, or every printing of the name.
@@ -57,5 +57,5 @@ npm run dev                        # http://localhost:3000
 | `RATE_LIMIT_PER_MINUTE` | `20` | per-IP limit on model calls |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | none | shared cache and rate limit (or `KV_REST_API_URL` / `_TOKEN`) |
 | `CRON_SECRET` | none | protects the daily price-refresh cron |
-| `NEXT_PUBLIC_OPENCV_URL` | jsDelivr `@techstark/opencv-js@4.10.0-release.1` | self-host to avoid the CDN |
+| `NEXT_PUBLIC_OPENCV_URL` | `/vendor/opencv-4.10.0.js` | override where OpenCV.js loads from |
 # tcg_lookup

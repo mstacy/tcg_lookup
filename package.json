@@ -9,10 +9,13 @@
     "lint": "eslint",
     "dev:https": "next dev --turbopack --experimental-https -H 0.0.0.0",
     "test": "vitest run",
-    "test:e2e": "node tests/e2e/run.mjs"
+    "test:e2e": "node tests/e2e/run.mjs",
+    "predev": "node scripts/copy-vendor.mjs",
+    "prebuild": "node scripts/copy-vendor.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
+    "@techstark/opencv-js": "^4.10.0-release.1",
     "@upstash/redis": "^1.39.0",
     "next": "^15.5.27",
     "react": "^19.1.9",

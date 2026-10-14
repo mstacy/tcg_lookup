@@ -1,10 +1,9 @@
-"use client";
-
+/**
+ * Card detection on raw pixels (ImageData), with no DOM access, so the same code runs
+ * in the detector Web Worker or on the main thread as a fallback.
+ */
+import type { CV } from "./opencv";
 import type { Point, Quad } from "./types";
-
-const OPENCV_URL =
-  process.env.NEXT_PUBLIC_OPENCV_URL ??
-  "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js";
 
 /** Standard TCG card: 63 x 88 mm. */
 const CARD_RATIO = 63 / 88;
@@ -14,45 +13,6 @@ const MIN_AREA_FRACTION = 0.03; // a card held at arm's length from a laptop web
 
 export const WARP_SHORT_SIDE = 630;
 export const WARP_LONG_SIDE = 880;
-
-// OpenCV.js has no bundled types; keep `any` contained to this module.
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type CV = any;
-let cvPromise: Promise<CV> | null = null;
-
-export function loadOpenCV(): Promise<CV> {
-  if (cvPromise) return cvPromise;
-  cvPromise = new Promise<CV>((resolve, reject) => {
-    // The Emscripten Module has its own `then`. Resolving a Promise with it makes the
-    // Promise adopt it as a thenable and never settle, so strip `then` first.
-    const ready = (mod: CV) => {
-      if (Object.prototype.hasOwnProperty.call(mod, "then")) delete mod.then;
-      (window as any).cv = mod;
-      resolve(mod);
-    };
-    const onReady = () => {
-      const cv = (window as any).cv;
-      if (cv instanceof Promise) {
-        cv.then(ready, reject);
-      } else if (cv?.Mat) {
-        ready(cv);
-      } else if (cv) {
-        cv.onRuntimeInitialized = () => ready(cv);
-      } else {
-        reject(new Error("OpenCV.js loaded but `cv` is missing."));
-      }
-    };
-    if ((window as any).cv) return onReady();
-    const script = document.createElement("script");
-    script.src = OPENCV_URL;
-    script.async = true;
-    script.onload = onReady;
-    script.onerror = () => reject(new Error("Failed to load OpenCV.js."));
-    document.head.appendChild(script);
-  });
-  cvPromise.catch(() => (cvPromise = null));
-  return cvPromise;
-}
 
 /** Order four points as top-left, top-right, bottom-right, bottom-left. */
 function orderCorners(points: Point[]): Quad {
@@ -148,10 +108,10 @@ function contourToQuad(cv: CV, contour: CV): Quad | null {
 
 /**
  * Find the most card-like quadrilateral in a (downscaled) frame.
- * Returns corners in the source canvas's coordinate space, or null.
+ * Returns corners in the image's coordinate space, or null.
  */
-export function detectCard(cv: CV, source: HTMLCanvasElement): Quad | null {
-  const src = cv.imread(source);
+export function detectCard(cv: CV, source: ImageData): Quad | null {
+  const src = cv.matFromImageData(source);
   const gray = new cv.Mat();
   const edges = new cv.Mat();
   const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
@@ -199,14 +159,48 @@ export function detectCard(cv: CV, source: HTMLCanvasElement): Quad | null {
   }
 }
 
-/** Perspective-correct the card region of a full-resolution frame into a flat canvas. */
-export function warpCard(cv: CV, source: HTMLCanvasElement, quad: Quad): HTMLCanvasElement {
+/**
+ * Sharpness of the card region: variance of the Laplacian, which drops sharply with
+ * motion blur. Used to capture the crispest of the last few frames.
+ */
+export function sharpness(cv: CV, source: ImageData, quad: Quad): number {
+  const xs = quad.map((p) => p.x);
+  const ys = quad.map((p) => p.y);
+  const x = Math.max(0, Math.floor(Math.min(...xs)));
+  const y = Math.max(0, Math.floor(Math.min(...ys)));
+  const w = Math.min(source.width, Math.ceil(Math.max(...xs))) - x;
+  const h = Math.min(source.height, Math.ceil(Math.max(...ys))) - y;
+  if (w < 8 || h < 8) return 0;
+
+  const src = cv.matFromImageData(source);
+  const roi = src.roi(new cv.Rect(x, y, w, h));
+  const gray = new cv.Mat();
+  const lap = new cv.Mat();
+  const mean = new cv.Mat();
+  const std = new cv.Mat();
+  try {
+    cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY);
+    cv.Laplacian(gray, lap, cv.CV_64F);
+    cv.meanStdDev(lap, mean, std);
+    return std.data64F[0] ** 2;
+  } finally {
+    src.delete();
+    roi.delete();
+    gray.delete();
+    lap.delete();
+    mean.delete();
+    std.delete();
+  }
+}
+
+/** Perspective-correct the card region of a full-resolution frame into a flat image. */
+export function warpCard(cv: CV, source: ImageData, quad: Quad): ImageData {
   const { width, height } = quadSize(quad);
   const landscape = width > height;
   const outW = landscape ? WARP_LONG_SIDE : WARP_SHORT_SIDE;
   const outH = landscape ? WARP_SHORT_SIDE : WARP_LONG_SIDE;
 
-  const src = cv.imread(source);
+  const src = cv.matFromImageData(source);
   const dst = new cv.Mat();
   const from = cv.matFromArray(4, 1, cv.CV_32FC2, quad.flatMap((p) => [p.x, p.y]));
   const to = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, outW, 0, outW, outH, 0, outH]);
@@ -214,9 +208,7 @@ export function warpCard(cv: CV, source: HTMLCanvasElement, quad: Quad): HTMLCan
 
   try {
     cv.warpPerspective(src, dst, transform, new cv.Size(outW, outH), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
-    const out = document.createElement("canvas");
-    cv.imshow(out, dst);
-    return out;
+    return new ImageData(new Uint8ClampedArray(dst.data), outW, outH);
   } finally {
     src.delete();
     dst.delete();

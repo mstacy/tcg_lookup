@@ -3,9 +3,12 @@
  * synthetic card scenes (fake camera feeds) plus detector/matcher checks that need
  * OpenCV running in a real browser.
  */
-import { detectCard, loadOpenCV, warpCard } from "../../lib/cardDetector";
+import { detectCard, sharpness, warpCard } from "../../lib/cardDetector";
 import { countInliers, extractFeatures, isSameCard } from "../../lib/cardMatcher";
+import { loadOpenCVInPage } from "../../lib/opencv";
 import type { Quad } from "../../lib/types";
+
+const pixelsOf = (c: HTMLCanvasElement) => c.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, c.width, c.height);
 
 /** Draw a fake card face. */
 function cardFace(title: string, hue: number): HTMLCanvasElement {
@@ -156,19 +159,19 @@ function makeFrames(count: number, opts: SceneOpts = {}): string[] {
 
 /** Detection and same-card matching checks; returns named results for assertions in Node. */
 async function detectorChecks() {
-  const cv = await loadOpenCV();
+  const cv = await loadOpenCVInPage();
   const k = 1280 / 480;
   const detect = (opts: SceneOpts) => {
     const { canvas, corners } = scene(opts);
-    const quad = detectCard(cv, downscale(canvas, 480));
+    const quad = detectCard(cv, pixelsOf(downscale(canvas, 480)));
     if (!corners.length) return { found: !!quad, err: null };
     const diag = Math.hypot(corners[0].x - corners[2].x, corners[0].y - corners[2].y);
     const err = quad ? Math.max(...quad.map((p) => Math.min(...corners.map((c) => Math.hypot(p.x * k - c.x, p.y * k - c.y))))) / diag : null;
     return { found: !!quad, err };
   };
   const featuresOf = (canvas: HTMLCanvasElement) => {
-    const quad = detectCard(cv, downscale(canvas, 480))!;
-    return extractFeatures(cv, warpCard(cv, canvas, quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad));
+    const quad = detectCard(cv, pixelsOf(downscale(canvas, 480)))!;
+    return extractFeatures(cv, warpCard(cv, pixelsOf(canvas), quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad));
   };
   const base = JSON.parse(JSON.stringify(featuresOf(scene({ angle: 12 }).canvas))); // localStorage round-trip
   const same = (canvas: HTMLCanvasElement) => isSameCard(cv, featuresOf(canvas), base);
@@ -200,4 +203,27 @@ async function detectorChecks() {
   };
 }
 
-Object.assign(window, { makeFrames, detectorChecks });
+/** Laplacian-variance sharpness of a JPEG (base64), e.g. a crop the app sent. */
+async function sharpnessOf(b64: string) {
+  const cv = await loadOpenCVInPage();
+  const img = new Image();
+  img.src = "data:image/jpeg;base64," + b64;
+  await img.decode();
+  const c = document.createElement("canvas");
+  c.width = img.width;
+  c.height = img.height;
+  c.getContext("2d")!.drawImage(img, 0, 0);
+  const w = c.width, h = c.height;
+  return sharpness(cv, pixelsOf(c), [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }]);
+}
+
+/** Frames for a shaky feed: most heavily motion-blurred, every third one sharp. */
+function makeShakyFrames(count: number, opts: SceneOpts = {}): string[] {
+  return Array.from({ length: count }, (_, i) => {
+    const { canvas } = scene({ angle: 8, ...opts, jitter: i % 2 });
+    const out = i % 3 === 0 ? canvas : filtered(canvas, "blur(3px)");
+    return out.toDataURL("image/jpeg", 0.9).split(",")[1];
+  });
+}
+
+Object.assign(window, { makeFrames, makeShakyFrames, detectorChecks, sharpnessOf });

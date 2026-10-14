@@ -1,17 +1,16 @@
 "use client";
 
-import { isSameCard, type CardFeatures } from "./cardMatcher";
+import type { CardFeatures } from "./cardMatcher";
+import type { Detector } from "./detector";
 import { hammingDistance } from "./fingerprint";
 import type { IdentifyResponse } from "./types";
 
 const STORAGE_KEY = "tcg:scans:v2"; // v2: catalog match shape
 const TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 80; // ~30 KB each (mostly ORB descriptors)
-const MATCH_BUDGET_MS = 600; // ORB match is ~30 ms per candidate
+const MAX_CANDIDATES = 10; // ORB-matched in the detector, which also enforces a time budget
 
 type Entry = { hash: string; features: CardFeatures; response: IdentifyResponse; expiresAt: number };
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 function load(): Entry[] {
   try {
@@ -41,28 +40,26 @@ function save(entries: Entry[]): void {
  * Find a scan of the same card from the last 24 hours on this device.
  * The hash only orders candidates (likeliest first); the ORB match makes the decision.
  */
-export function findCachedScan(cv: any, hash: string, features: CardFeatures): IdentifyResponse | null {
-  const match = findMatch(cv, load(), hash, features);
+export async function findCachedScan(detector: Detector, hash: string, features: CardFeatures): Promise<IdentifyResponse | null> {
+  const match = await findMatch(detector, load(), hash, features);
   return match ? { ...match.response, cache: "client" } : null;
 }
 
-function findMatch(cv: any, entries: Entry[], hash: string, features: CardFeatures): Entry | null {
+async function findMatch(detector: Detector, entries: Entry[], hash: string, features: CardFeatures): Promise<Entry | null> {
   const candidates = entries
     .map((entry) => ({ entry, distance: hammingDistance(entry.hash, hash) }))
-    .sort((a, b) => a.distance - b.distance);
-
-  const deadline = performance.now() + MATCH_BUDGET_MS;
-  for (const { entry } of candidates) {
-    if (isSameCard(cv, features, entry.features)) return entry;
-    if (performance.now() > deadline) break;
-  }
-  return null;
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, MAX_CANDIDATES)
+    .map((c) => c.entry);
+  if (!candidates.length) return null;
+  const index = await detector.match(features, candidates.map((c) => c.features));
+  return index >= 0 ? candidates[index] : null;
 }
 
 /** Store a scan, replacing any cached entry for the same card (e.g. after a forced rescan). */
-export function cacheScan(cv: any, hash: string, features: CardFeatures, response: IdentifyResponse): void {
+export async function cacheScan(detector: Detector, hash: string, features: CardFeatures, response: IdentifyResponse): Promise<void> {
   const entries = load();
-  const previous = findMatch(cv, entries, hash, features);
+  const previous = await findMatch(detector, entries, hash, features);
   const kept = previous ? entries.filter((e) => e !== previous) : entries;
   kept.push({ hash, features, response, expiresAt: Date.now() + TTL_MS });
   save(kept);

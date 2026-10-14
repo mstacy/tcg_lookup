@@ -37,6 +37,8 @@ async function test(name, fn) {
 
 async function startServer() {
   if (process.env.E2E_BASE_URL) return null;
+  // `next dev` is started directly (not via npm), so copy OpenCV into public/vendor here.
+  await import(path.join(root, "scripts/copy-vendor.mjs"));
   const server = spawn("npx", ["next", "dev", "--turbopack", "-p", String(PORT)], { cwd: root, stdio: "ignore", detached: true });
   for (let i = 0; i < 60; i++) {
     try {
@@ -54,7 +56,8 @@ async function bundleScenes() {
     bundle: true,
     format: "iife",
     outfile: out,
-    define: { "process.env.NEXT_PUBLIC_OPENCV_URL": "undefined" },
+    // The harness runs on a blank page, so OpenCV needs an absolute URL (served by the app).
+    define: { "process.env.NEXT_PUBLIC_OPENCV_URL": JSON.stringify(`${BASE}/vendor/opencv-4.10.0.js`) },
     logLevel: "warning",
   });
   return fs.readFileSync(out, "utf8");
@@ -69,6 +72,8 @@ async function writeFeeds(scenesJs) {
     const frames = await page.evaluate((o) => window.makeFrames(10, o), opts);
     fs.writeFileSync(path.join(tmp, `feed${name}.mjpeg`), Buffer.concat(frames.map((f) => Buffer.from(f, "base64"))));
   }
+  const shaky = await page.evaluate(() => window.makeShakyFrames(12, { title: "Lightning Bolt", hue: 10 }));
+  fs.writeFileSync(path.join(tmp, "feedShaky.mjpeg"), Buffer.concat(shaky.map((f) => Buffer.from(f, "base64"))));
   await browser.close();
 }
 
@@ -232,6 +237,43 @@ async function main() {
         await page.getByText("$4.50").waitFor({ timeout: 5000 });
         assert.deepEqual(priceCalls, ["?scryfallId=sf-ice"]);
         assert.ok(await page.getByLabel("Condition").count(), "conditions available after refining");
+      } finally {
+        await app.ctx.close();
+      }
+    });
+
+    console.log("capture quality + performance");
+    await test("detection runs in a Web Worker and the main thread stays free", async () => {
+      const app = await openApp("A", { profile: "perf-profile", respond: () => identifyResponse("Lightning Bolt") });
+      try {
+        const { page } = app;
+        await page.locator("main[data-detector]").waitFor({ timeout: 30_000 });
+        assert.equal(await page.locator("main").getAttribute("data-detector"), "worker");
+        // Long tasks (>50 ms) on the main thread while detection keeps running.
+        const longTasks = await page.evaluate(
+          () =>
+            new Promise((resolve) => {
+              let total = 0;
+              const obs = new PerformanceObserver((list) => list.getEntries().forEach((e) => (total += e.duration)));
+              obs.observe({ type: "longtask" });
+              setTimeout(() => {
+                obs.disconnect();
+                resolve(total);
+              }, 3000);
+            }),
+        );
+        assert.ok(longTasks < 400, `${Math.round(longTasks)} ms of main-thread long tasks in 3 s`);
+      } finally {
+        await app.ctx.close();
+      }
+    });
+    await test("auto-capture uses the sharpest recent frame under shake", async () => {
+      const app = await openApp("Shaky", { profile: "shaky-profile", respond: () => identifyResponse("Lightning Bolt") });
+      try {
+        await heading(app.page, "Lightning Bolt");
+        const info = await app.page.evaluate(() => window.__tcgCapture);
+        assert.ok(info && info.candidates.length >= 2, "several frames were buffered");
+        assert.equal(info.chosen, Math.max(...info.candidates));
       } finally {
         await app.ctx.close();
       }

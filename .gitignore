@@ -45,3 +45,6 @@ certificates
 # eval samples are card photos; keep them local unless you choose to commit them
 /data/eval/*
 !/data/eval/README.md
+
+# copied from node_modules by scripts/copy-vendor.mjs
+/public/vendor
