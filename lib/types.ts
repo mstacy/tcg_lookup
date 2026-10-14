@@ -13,23 +13,8 @@ export type Identification = {
   cardType: string | null;
   setCode: string | null;
   collectorNumber: string | null;
-};
-
-export type Verification = {
-  source: string;
-  name: string;
-  url: string | null;
-  imageUrl: string | null;
-  setName: string | null;
-  setCode: string | null;
-  number: string | null;
-  rarity: string | null;
-  /** Scryfall card id; lets JustTCG price this exact printing. */
-  scryfallId: string | null;
-  /** True when matched by set code + collector number rather than by name alone. */
-  exactPrinting: boolean;
-  /** Scryfall's TCGplayer market prices (USD), the fallback when JustTCG is unavailable. */
-  prices: { usd: number | null; usdFoil: number | null } | null;
+  /** Best guess at the set from its symbol, frame and layout. Ranking hint only, never treated as read. */
+  setNameGuess: string | null;
 };
 
 export type PriceVariant = {
@@ -41,32 +26,47 @@ export type PriceVariant = {
   lastUpdated: number | null;
 };
 
-/** One printing of a card (a specific set + number), with a price per condition and finish. */
+/** One real printing of a card from a catalog (Scryfall or JustTCG), with its prices. */
 export type CardPrinting = {
+  /** Catalog id: Scryfall id for Magic, JustTCG card id otherwise. */
   id: string;
   name: string;
   setName: string | null;
+  setCode: string | null;
   number: string | null;
   rarity: string | null;
+  imageUrl: string | null;
+  /** Card page (Scryfall or TCGplayer). */
+  url: string | null;
   tcgplayerId: string | null;
+  scryfallId: string | null;
   variants: PriceVariant[];
+  priceSource: string | null;
+  /** Set when prices come from the catalog snapshot rather than a fresh lookup (Unix seconds). */
+  priceAsOf: number | null;
+  /** True when fuller (per-condition) prices can be fetched on demand from /api/price. */
+  canRefinePrice: boolean;
 };
 
-export type Pricing = {
-  source: string;
-  /** Candidate printings, best match first. */
+export type CardMatch = {
+  /**
+   * exact: set/number or a unique name pinned one printing.
+   * chosen: several matched and Claude picked one by comparing the image.
+   * ranked: best guess; the user should check the set dropdown.
+   */
+  method: "exact" | "chosen" | "ranked";
+  /** Candidate printings, best first. */
   printings: CardPrinting[];
-  /** False when the set/number couldn't be matched and the first printing is a best guess. */
-  confident: boolean;
-  /** True when the pricing source lists a card with exactly this name (confirms the reading). */
+  /** True when the catalog lists a card with exactly the name that was read. */
   exactName: boolean;
+  /** Where the candidates came from, e.g. "Scryfall" or "JustTCG". */
+  catalog: string;
 };
 
 export type IdentifyResponse = {
   identification: Identification;
-  verification: Verification | null;
-  pricing: Pricing | null;
-  /** Why pricing is missing (no API key, quota used up, ...), when it is. */
+  match: CardMatch | null;
+  /** Why pricing or matching is missing (no catalog, quota used up, ...), when it is. */
   pricingError: string | null;
   /** "client" when served from this device's 24h scan cache without calling the server. */
   cache: "none" | "client";

@@ -32,7 +32,8 @@ const CONFIDENCE_STYLES = {
 
 export default function ResultPanel({ result, history, error, busy, onRescan, onSelect }: Props) {
   const id = result?.identification;
-  const verification = result?.verification;
+  const match = result?.match;
+  const shownName = result ? displayName(result) : null;
   // Remembered across scans (and visits), since people tend to grade a stack the same way.
   const [condition, setCondition] = useState(CONDITION_ORDER[0]);
   useEffect(() => setCondition(loadCondition()), []);
@@ -62,36 +63,18 @@ export default function ResultPanel({ result, history, error, busy, onRescan, on
 
       {id?.isCard && (
         <div className="flex gap-4">
-          {verification?.imageUrl && (
-            // External card art from the verifier; next/image would need remote host config.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={verification.imageUrl}
-              alt={verification.name}
-              className="h-36 w-auto shrink-0 rounded-lg shadow-lg"
-            />
-          )}
           <div className="flex min-w-0 flex-col gap-2">
             <h2 className="text-2xl font-bold leading-tight break-words">
-              {(result && displayName(result)) ?? "Title unreadable"}
+              {shownName ?? "Title unreadable"}
             </h2>
-            {verification && id.title && verification.name.toLowerCase() !== id.title.toLowerCase() && (
+            {id.title && shownName && !shownName.toLowerCase().startsWith(id.title.toLowerCase()) && (
               <p className="text-xs text-neutral-400">Read as “{id.title}”</p>
             )}
             <div className="flex flex-wrap gap-1.5 text-xs">
               <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-300">{id.game ?? "Unknown game"}</span>
               <span className={`rounded-full px-2 py-0.5 ${CONFIDENCE_STYLES[id.confidence]}`}>{id.confidence} confidence</span>
-              {verification ? (
-                <a
-                  href={verification.url ?? undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300 hover:underline"
-                >
-                  ✓ {verification.source}
-                </a>
-              ) : result?.pricing?.exactName ? (
-                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300">✓ {result?.pricing.source}</span>
+              {match?.exactName ? (
+                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300">✓ {match.catalog}</span>
               ) : (
                 <span className="rounded-full bg-neutral-500/15 px-2 py-0.5 text-neutral-400">unverified</span>
               )}

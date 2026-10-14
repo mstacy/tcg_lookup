@@ -4,7 +4,7 @@ import { isSameCard, type CardFeatures } from "./cardMatcher";
 import { hammingDistance } from "./fingerprint";
 import type { IdentifyResponse } from "./types";
 
-const STORAGE_KEY = "tcg:scans";
+const STORAGE_KEY = "tcg:scans:v2"; // v2: catalog match shape
 const TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 80; // ~30 KB each (mostly ORB descriptors)
 const MATCH_BUDGET_MS = 600; // ORB match is ~30 ms per candidate

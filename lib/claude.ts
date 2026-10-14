@@ -1,9 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import type { Identification } from "./types";
+import type { CardPrinting, Identification } from "./types";
 
 export const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
+export const CHOOSER_MODEL = process.env.ANTHROPIC_CHOOSER_MODEL ?? MODEL;
 
 const IdentificationSchema = z.object({
   isCard: z.boolean().describe("True only if the image shows a trading card game card."),
@@ -23,6 +24,10 @@ const IdentificationSchema = z.object({
   cardType: z.string().nullable().describe("Type line or card category if legible, e.g. 'Legendary Creature — Elf'."),
   setCode: z.string().nullable().describe("Set code if legible, e.g. 'M21' or 'MKM'."),
   collectorNumber: z.string().nullable().describe("Collector number if legible, e.g. '123' or '045/271'."),
+  setNameGuess: z
+    .string()
+    .nullable()
+    .describe("Your best guess at the set's full name from its set symbol, frame style and layout, e.g. 'Seventh Edition'. Null if you can't tell."),
 });
 
 const SYSTEM_PROMPT = `You identify trading card game (TCG) cards from camera photos.
@@ -34,7 +39,7 @@ Layout hints:
 - Cyberpunk TCG (Cyberpunk 2077 trading card game): the card name is the largest text, usually with a smaller subtitle (epithet) next to or under it, e.g. "Jackie Welles" / "Mama's Favorite". Return the name as the title and the epithet as the subtitle. Card types include Legends, Units, Gear and Programs.
 - Other games (Pokémon, Yu-Gi-Oh!, Lorcana, One Piece, Flesh and Blood, etc.) are fine. Name the game if you recognize it, otherwise return null for game.
 
-After the title, the set code and collector number matter most: they identify the exact printing, which determines the price. Read them if they're legible (they're usually small print along the bottom edge), but never guess them.
+After the title, the set code and collector number matter most: they identify the exact printing, which determines the price. Read them if they're legible (they're usually small print along the bottom edge), but never guess them. Separately, give your best guess at the set's name from the set symbol and frame style in setNameGuess; that one may be a guess.
 
 If the image does not show a TCG card (e.g. a sports card, a book, a phone, an empty scene), set isCard to false and leave the other fields null.`;
 
@@ -85,7 +90,8 @@ export async function identifyCard(jpegBase64: string): Promise<Identification> 
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     output_config: { effort: "low", format: betaZodOutputFormat(IdentificationSchema) },
-    system: SYSTEM_PROMPT,
+    // The prompt + output schema (~1,650 tokens) is identical on every scan: cache it.
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     messages: [
       {
         role: "user",
@@ -109,4 +115,57 @@ export async function identifyCard(jpegBase64: string): Promise<Identification> 
     throw new IdentifyError("Could not parse the model response.");
   }
   return response.parsed_output;
+}
+
+const CHOOSER_PROMPT = `You match a photographed trading card to one entry in a list of real catalog printings of that card.
+
+Compare what's visible on the photo against each candidate: the exact name and subtitle, set symbol and set code, collector number, rarity, frame style, and (when candidate images are given) the artwork. Pick the candidate that is the same printing as the photo. If none of them is, or you can't tell, answer "none". Don't pick one just because it's first.`;
+
+/**
+ * Second pass when retrieval is ambiguous: show Claude the scan together with the real
+ * candidates (and their images, when available) and have it pick one by id.
+ * Returns the chosen candidate id, or null for "none".
+ */
+export async function chooseCandidate(
+  jpegBase64: string,
+  candidates: CardPrinting[],
+  thumbnails: (string | null)[] = [],
+): Promise<string | null> {
+  const ids = candidates.map((c) => c.id);
+  const Choice = z.object({
+    candidateId: z.enum([...ids, "none"] as unknown as [string, ...string[]]).describe("The id of the matching candidate, or 'none'."),
+    reason: z.string().describe("One short sentence on what decided it."),
+  });
+
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [
+    { type: "text", text: "Photographed card:" },
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+  ];
+  candidates.forEach((c, i) => {
+    const line = [c.name, c.setName && `${c.setName}${c.setCode ? ` (${c.setCode})` : ""}`, c.number && `#${c.number}`, c.rarity]
+      .filter(Boolean)
+      .join(" | ");
+    content.push({ type: "text", text: `Candidate ${i + 1}: id=${c.id} | ${line}` });
+    const thumb = thumbnails[i];
+    if (thumb) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: thumb } });
+  });
+  content.push({ type: "text", text: "Which candidate is the photographed card?" });
+
+  const response = await client.beta.messages.parse({
+    model: CHOOSER_MODEL,
+    max_tokens: 2048,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    output_config: { effort: "low", format: betaZodOutputFormat(Choice) },
+    system: CHOOSER_PROMPT,
+    messages: [{ role: "user", content }],
+  });
+  logUsage("choose", response.model, response.usage);
+
+  if (response.stop_reason !== "end_turn" || !response.parsed_output) {
+    console.warn(`[claude] choose: no usable answer (${response.stop_reason})`);
+    return null;
+  }
+  console.log(`[claude] choose: ${response.parsed_output.candidateId} (${response.parsed_output.reason})`);
+  return response.parsed_output.candidateId === "none" ? null : response.parsed_output.candidateId;
 }

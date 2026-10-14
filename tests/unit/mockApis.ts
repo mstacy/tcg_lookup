@@ -59,8 +59,9 @@ export function installMockApis(): MockState {
       const data = (cards: unknown[]) => Response.json({ data: cards, _metadata: { apiDailyRequestsRemaining: 99 } });
       if (url.pathname === "/v1/games") return data(GAMES);
       if (url.pathname === "/v1/cards" && init?.method === "POST") {
-        const ids = (JSON.parse(String(init.body)) as { cardId?: string }[]).map((i) => i.cardId);
-        return data(JUSTTCG_CARDS.filter((c) => ids.includes(c.id)));
+        // Batch pricing: known mock cards, plus a generated price for any other id (e.g. snapshot ids).
+        const ids = (JSON.parse(String(init.body)) as { cardId: string }[]).map((i) => i.cardId);
+        return data(ids.map((id) => JUSTTCG_CARDS.find((c) => c.id === id) ?? { id, name: id, variants: variants(5) }));
       }
       if (url.pathname === "/v1/cards") {
         const p = url.searchParams;
@@ -97,7 +98,7 @@ export function installMockApis(): MockState {
 
 export { clearAllCaches as resetCaches } from "@/lib/cache";
 
-export const ident = (game: string, title: string, extra: Partial<{ subtitle: string; setCode: string; collectorNumber: string }> = {}) => ({
+export const ident = (game: string, title: string, extra: Partial<{ subtitle: string; setCode: string; collectorNumber: string; setNameGuess: string }> = {}) => ({
   isCard: true,
   game,
   title,
@@ -106,4 +107,5 @@ export const ident = (game: string, title: string, extra: Partial<{ subtitle: st
   cardType: null,
   setCode: extra.setCode ?? null,
   collectorNumber: extra.collectorNumber ?? null,
+  setNameGuess: extra.setNameGuess ?? null,
 });

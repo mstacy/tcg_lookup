@@ -74,8 +74,7 @@ async function writeFeeds(scenesJs) {
 
 const identifyResponse = (title, extra = {}) => ({
   identification: { isCard: true, game: "Magic: The Gathering", title, subtitle: null, confidence: "high", cardType: "Instant", setCode: null, collectorNumber: null },
-  verification: null,
-  pricing: null,
+  match: null,
   pricingError: null,
   cache: "none",
   scannedAt: Date.now(),
@@ -169,12 +168,13 @@ async function main() {
       const now = Math.floor(Date.now() / 1000);
       const v = (condition, printing, price) => ({ condition, printing, price, lastUpdated: now - 3 * 3600 });
       const printing = (id, setName, number, rarity, base) => ({
-        id, name: "Jackie Welles - Mama's Favorite", setName, number, rarity, tcgplayerId: "555",
+        id, name: "Jackie Welles - Mama's Favorite", setName, setCode: null, number, rarity, imageUrl: null, url: null,
+        tcgplayerId: "555", scryfallId: null, priceSource: "JustTCG", priceAsOf: null, canRefinePrice: false,
         variants: [v("Near Mint", "Normal", base), v("Lightly Played", "Normal", +(base * 0.85).toFixed(2)), v("Moderately Played", "Normal", +(base * 0.7).toFixed(2)), v("Damaged", "Normal", null), v("Near Mint", "Foil", base * 3), v("Lightly Played", "Foil", base * 2.5)],
       });
       const response = identifyResponse("Jackie Welles", {
         identification: { isCard: true, game: "Cyberpunk TCG", title: "Jackie Welles", subtitle: "Mama's Favorite", confidence: "high", cardType: "Legend", setCode: null, collectorNumber: "007" },
-        pricing: { source: "JustTCG", confident: true, exactName: true, printings: [printing("a", "Pre-Release Beta", "007", "R", 4.25), printing("b", "Promo", "P-004", "Promo", 12)] },
+        match: { method: "exact", catalog: "JustTCG", exactName: true, printings: [printing("a", "Pre-Release Beta", "007", "R", 4.25), printing("b", "Promo", "P-004", "Promo", 12)] },
       });
       const app = await openApp("A", { profile: "price-profile", respond: () => response });
       try {
@@ -196,6 +196,42 @@ async function main() {
         await page.reload();
         await heading(page, "Jackie Welles - Mama's Favorite");
         assert.equal(await page.getByLabel("Condition").inputValue(), "Moderately Played", "condition remembered across visits");
+      } finally {
+        await app.ctx.close();
+      }
+    });
+
+    await test("picking another printing fetches its per-condition prices", async () => {
+      const sf = (id, setName, setCode, number, nm) => ({
+        id, name: "Counterspell", setName, setCode, number, rarity: "Uncommon", imageUrl: null, url: null, tcgplayerId: null,
+        scryfallId: id, priceSource: "Scryfall (TCGplayer market)", priceAsOf: null, canRefinePrice: true,
+        variants: [{ condition: "Near Mint", printing: "Normal", price: nm, lastUpdated: null }],
+      });
+      const top = { ...sf("sf-7ed", "Seventh Edition", "7ED", "67", 1.5), priceSource: "JustTCG", canRefinePrice: false,
+        variants: [{ condition: "Near Mint", printing: "Normal", price: 1.75, lastUpdated: null }, { condition: "Lightly Played", printing: "Normal", price: 1.4, lastUpdated: null }] };
+      const response = identifyResponse("Counterspell", {
+        match: { method: "chosen", catalog: "Scryfall", exactName: true, printings: [top, sf("sf-ice", "Ice Age", "ICE", "64", 3)] },
+      });
+      const app = await openApp("A", { profile: "refine-profile", respond: () => response });
+      const priceCalls = [];
+      await app.page.route("**/api/price*", async (route) => {
+        priceCalls.push(new URL(route.request().url()).search);
+        await route.fulfill({ json: { tcgplayerId: "999", variants: [
+          { condition: "Near Mint", printing: "Normal", price: 4.5, lastUpdated: null },
+          { condition: "Lightly Played", printing: "Normal", price: 3.9, lastUpdated: null },
+        ] } });
+      });
+      try {
+        const { page } = app;
+        const price = () => page.locator("span.text-3xl").textContent();
+        await heading(page, "Counterspell");
+        assert.equal(await price(), "$1.75");
+        assert.ok(await page.getByText(/Matched by comparing the photo/).count(), "chosen note shown");
+        assert.equal(priceCalls.length, 0, "top printing is already priced");
+        await page.getByLabel("Set").selectOption("sf-ice");
+        await page.getByText("$4.50").waitFor({ timeout: 5000 });
+        assert.deepEqual(priceCalls, ["?scryfallId=sf-ice"]);
+        assert.ok(await page.getByLabel("Condition").count(), "conditions available after refining");
       } finally {
         await app.ctx.close();
       }
