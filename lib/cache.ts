@@ -40,11 +40,20 @@ export class MemoryTtlCache<V> implements TtlCache<V> {
       this.entries.delete(oldest);
     }
   }
+
+  clear(): void {
+    this.entries.clear();
+  }
 }
 
 // Survive Next.js dev hot reloads by pinning caches to globalThis.
 const globalCaches = globalThis as unknown as { __tcgCaches?: Map<string, MemoryTtlCache<unknown>> };
 globalCaches.__tcgCaches ??= new Map();
+
+/** Empty every named cache (used by tests). */
+export function clearAllCaches(): void {
+  for (const cache of globalCaches.__tcgCaches!.values()) cache.clear();
+}
 
 export function namedCache<V>(name: string): TtlCache<V> {
   let cache = globalCaches.__tcgCaches!.get(name);

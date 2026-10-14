@@ -40,6 +40,35 @@ If the image does not show a TCG card (e.g. a sports card, a book, a phone, an e
 
 const client = new Anthropic();
 
+// USD per million tokens: [input, output, cache read, cache write (5-minute TTL)].
+// Cache rates use the standard 0.1x (read) and 1.25x (write) of input where unlisted.
+const RATES: Record<string, [number, number, number, number]> = {
+  "claude-opus-5-5": [4, 20, 0.2, 5],
+  "claude-sonnet-5-5": [2, 10, 0.2, 2.5],
+  "claude-haiku-5-5": [0.1, 0.5, 0.01, 0.125],
+};
+
+type Usage = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+};
+
+/** Log token usage and estimated cost per call, so cost per scan is measured, not guessed. */
+function logUsage(label: string, model: string, usage: Usage) {
+  const read = usage.cache_read_input_tokens ?? 0;
+  const write = usage.cache_creation_input_tokens ?? 0;
+  const rates = RATES[model];
+  const cost = rates
+    ? (usage.input_tokens * rates[0] + usage.output_tokens * rates[1] + read * rates[2] + write * rates[3]) / 1e6
+    : null;
+  console.log(
+    `[claude] ${label} ${model} in=${usage.input_tokens} out=${usage.output_tokens} cache_read=${read} cache_write=${write}` +
+      (cost !== null ? ` cost=${cost.toFixed(5)}` : ""),
+  );
+}
+
 export class IdentifyError extends Error {
   constructor(
     message: string,
@@ -67,6 +96,8 @@ export async function identifyCard(jpegBase64: string): Promise<Identification> 
       },
     ],
   });
+
+  logUsage("identify", response.model, response.usage);
 
   if (response.stop_reason === "refusal") {
     throw new IdentifyError("The model declined to identify this image.", 422);

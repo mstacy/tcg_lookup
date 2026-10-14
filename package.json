@@ -7,7 +7,9 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "dev:https": "next dev --turbopack --experimental-https -H 0.0.0.0"
+    "dev:https": "next dev --turbopack --experimental-https -H 0.0.0.0",
+    "test": "vitest run",
+    "test:e2e": "node tests/e2e/run.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
@@ -22,9 +24,12 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.25.10",
     "eslint": "^9",
     "eslint-config-next": "^15.5.27",
+    "playwright-core": "^1.49.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }
