@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   }
 
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
-  if (!allowRequest(ip)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  if (!(await allowRequest(ip))) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
   try {
     const refined = await refinePrice(id);

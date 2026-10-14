@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
   if (image.length > MAX_IMAGE_BASE64_CHARS) return error("Image too large (max ~4 MB).", 413);
 
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
-  if (!allowRequest(ip)) return error("Too many scans. Wait a minute and try again.", 429);
+  if (!(await allowRequest(ip))) return error("Too many scans. Wait a minute and try again.", 429);
 
   let identification: Identification;
   try {

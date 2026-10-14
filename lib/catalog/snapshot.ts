@@ -20,6 +20,8 @@ type Snapshot = {
 
 const SNAPSHOTS: Record<string, Snapshot> = { "cyberpunk-tcg": cyberpunk as Snapshot };
 
+export const SNAPSHOT_GAMES = Object.keys(SNAPSHOTS);
+
 export function hasSnapshot(gameId: string): boolean {
   return gameId in SNAPSHOTS;
 }
@@ -54,7 +56,7 @@ const priceMaps = namedCache<PriceMap>("snapshot-prices");
 export async function refreshPriceMap(gameId: string): Promise<PriceMap> {
   const cards = await cardsByIds(SNAPSHOTS[gameId].cards.map((c) => c.id));
   const map: PriceMap = Object.fromEntries(cards.map((c) => [c.id, englishVariants(c.variants)]));
-  priceMaps.set(gameId, map);
+  await priceMaps.set(gameId, map);
   return map;
 }
 
@@ -64,7 +66,7 @@ export async function refreshPriceMap(gameId: string): Promise<PriceMap> {
  */
 export async function priceSnapshotPrintings(gameId: string, printings: CardPrinting[]): Promise<{ printings: CardPrinting[]; error: string | null }> {
   if (!hasJustTcgKey()) return { printings, error: null };
-  let map = priceMaps.get(gameId);
+  let map = await priceMaps.get(gameId);
   let error: string | null = null;
   if (!map) {
     try {

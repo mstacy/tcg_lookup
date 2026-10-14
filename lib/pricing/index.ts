@@ -12,11 +12,11 @@ const printingPrices = namedCache<Refined | null>("printing-prices");
 /** Full per-condition JustTCG prices for one printing (by Scryfall id or JustTCG card id). */
 export async function refinePrice(id: { scryfallId: string } | { cardId: string }, { fresh = false } = {}): Promise<Refined | null> {
   const key = "scryfallId" in id ? `sf:${id.scryfallId}` : `jt:${id.cardId}`;
-  const cached = fresh ? undefined : printingPrices.get(key);
+  const cached = fresh ? undefined : await printingPrices.get(key);
   if (cached !== undefined) return cached;
   const card = await cardBy(id);
   const result = card ? { variants: englishVariants(card.variants), tcgplayerId: card.tcgplayerId ?? null } : null;
-  printingPrices.set(key, result);
+  await printingPrices.set(key, result);
   return result;
 }
 

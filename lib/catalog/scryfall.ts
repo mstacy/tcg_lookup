@@ -30,6 +30,21 @@ async function get<T>(path: string): Promise<T | null> {
 const exactCache = namedCache<ScryfallCard | null>("scryfall-exact");
 const printsCache = namedCache<ScryfallCard[]>("scryfall-prints");
 
+/** Keep only the fields we use: full Scryfall objects are large, and get cached. */
+function trim(c: ScryfallCard): ScryfallCard {
+  return {
+    id: c.id,
+    name: c.name,
+    scryfall_uri: c.scryfall_uri,
+    set: c.set,
+    set_name: c.set_name,
+    collector_number: c.collector_number,
+    rarity: c.rarity,
+    prices: { usd: c.prices.usd, usd_foil: c.prices.usd_foil },
+    image_uris: { small: image(c, "small") ?? undefined, normal: image(c, "normal") ?? undefined },
+  };
+}
+
 const compact = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 /** The printing at set code + collector number, if it carries the name that was read. */
@@ -38,10 +53,11 @@ export async function exactPrinting(title: string, setCode: string | null, numbe
   const n = normalizeNumber(number);
   if (!set || !n || !/^[a-z0-9]{2,6}$/.test(set)) return null;
   const key = `${set}/${n}`;
-  let card = exactCache.get(key);
+  let card = await exactCache.get(key);
   if (card === undefined) {
-    card = await get<ScryfallCard>(`/cards/${encodeURIComponent(set)}/${encodeURIComponent(n)}`);
-    exactCache.set(key, card);
+    const found = await get<ScryfallCard>(`/cards/${encodeURIComponent(set)}/${encodeURIComponent(n)}`);
+    card = found && trim(found);
+    await exactCache.set(key, card);
   }
   // A misread number could land on a different card; only trust it if the name agrees.
   return card && compact(card.name).startsWith(compact(title).slice(0, 10)) ? card : null;
@@ -50,12 +66,12 @@ export async function exactPrinting(title: string, setCode: string | null, numbe
 /** Every printing of the card whose name best matches `title` (fuzzy, so misreads still resolve). */
 export async function allPrintings(title: string): Promise<ScryfallCard[]> {
   const key = normalizeTitle(title);
-  const cached = printsCache.get(key);
+  const cached = await printsCache.get(key);
   if (cached) return cached;
 
   const named = await get<ScryfallCard>(`/cards/named?fuzzy=${encodeURIComponent(title)}`);
   if (!named) {
-    printsCache.set(key, []);
+    await printsCache.set(key, []);
     return [];
   }
   const cards: ScryfallCard[] = [];
@@ -66,8 +82,8 @@ export async function allPrintings(title: string): Promise<ScryfallCard[]> {
     cards.push(...page.data);
     next = page.has_more && page.next_page ? page.next_page.replace("https://api.scryfall.com", "") : null;
   }
-  const result = cards.length ? cards : [named];
-  printsCache.set(key, result);
+  const result = (cards.length ? cards : [named]).map(trim);
+  await printsCache.set(key, result);
   return result;
 }
 

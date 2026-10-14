@@ -16,7 +16,15 @@ Point a laptop or phone camera at a trading card to identify the game and read t
 ## 24-hour caching
 
 - **On the device:** each scan is fingerprinted with ORB keypoints (`lib/cardMatcher.ts`) and kept in localStorage for 24 h. Rescanning the same card is answered instantly with no server call. "Rescan (skip cache)" forces a fresh read and replaces the cached entry.
-- **On the server:** catalog lookups and prices are cached for 24 h (`lib/catalog/`, `lib/pricing/`). JustTCG's free plan allows 100 requests a day and 1,000 a month, so this keeps repeat scans free. The cache lives in memory; swap in Redis/KV through the `TtlCache` interface in `lib/cache.ts` if you deploy to serverless.
+- **On the server:** catalog lookups and prices are cached for 24 h (`lib/catalog/`, `lib/pricing/`). JustTCG's free plan allows 100 requests a day and 1,000 a month, so this keeps repeat scans free.
+  - With Upstash Redis configured (`UPSTASH_REDIS_REST_URL`/`TOKEN`, or Vercel's `KV_REST_API_URL`/`TOKEN`), the cache and the per-IP rate limit are shared by every server instance. Without it, each instance keeps its own in-memory cache.
+  - A daily Vercel cron (`vercel.json` → `/api/cron/refresh-prices`, protected by `CRON_SECRET`) re-prices the snapshot games in 3 batch requests, so Cyberpunk scans never wait on JustTCG.
+
+## Deploying to Vercel
+
+1. Add the environment variables below in the Vercel project settings.
+2. Add Upstash Redis from the Vercel Marketplace (Storage → Upstash, free tier is plenty); it sets the `KV_REST_API_*` variables for you.
+3. Set `CRON_SECRET` to any long random string; Vercel sends it to the cron route automatically.
 
 ## Setup
 
@@ -47,5 +55,7 @@ npm run dev                        # http://localhost:3000
 | `ANTHROPIC_CHOOSER_MODEL` | same as `ANTHROPIC_MODEL` | picks among candidates when ambiguous |
 | `CACHE_TTL_MS` | `86400000` | server lookup cache TTL |
 | `RATE_LIMIT_PER_MINUTE` | `20` | per-IP limit on model calls |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | none | shared cache and rate limit (or `KV_REST_API_URL` / `_TOKEN`) |
+| `CRON_SECRET` | none | protects the daily price-refresh cron |
 | `NEXT_PUBLIC_OPENCV_URL` | jsDelivr `@techstark/opencv-js@4.10.0-release.1` | self-host to avoid the CDN |
 # tcg_lookup
