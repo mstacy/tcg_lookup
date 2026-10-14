@@ -6,12 +6,13 @@ Point a laptop or phone camera at a trading card to identify the game and read t
 
 1. **In-browser detection (OpenCV.js):** finds the card's outline in the live feed, waits until it's held steady, then perspective-corrects the card into a flat 630×880 crop.
 2. **Identification (`/api/identify`):** sends the crop to Claude (`claude-opus-5-5`, structured output), which returns `isCard`, `game`, and `title`.
-3. **Verification:** Magic: The Gathering titles are fuzzy-matched against Scryfall. Cyberpunk TCG has no public card API, so its titles are shown unverified. To add another game, register a verifier in `lib/verify/index.ts`.
+3. **Verification:** Magic: The Gathering cards are matched against Scryfall, using the set code and collector number when they're legible so the exact printing is found. To add another game, register a verifier in `lib/verify/index.ts`.
+4. **Pricing ([JustTCG](https://justtcg.com)):** set, rarity, number, and TCGplayer market prices for every condition and finish (Normal/Foil). It covers Magic, Cyberpunk TCG, Pokémon, and more. Magic printings are priced exactly via their Scryfall id; other games are searched by name and ranked by collector number. When the set can't be read, a set dropdown lets you pick the printing. Without a `JUSTTCG_API_KEY` (or when JustTCG is unavailable), Magic falls back to Scryfall's Near Mint price.
 
 ## 24-hour caching
 
 - **On the device:** each scan is fingerprinted with ORB keypoints (`lib/cardMatcher.ts`) and kept in localStorage for 24 h. Rescanning the same card is answered instantly with no server call. "Rescan (skip cache)" forces a fresh read and replaces the cached entry.
-- **On the server:** card-database lookups are cached by game and normalized title for 24 h, misses included (`lib/verify/index.ts`). The cache lives in memory; swap in Redis/KV through the `TtlCache` interface in `lib/cache.ts` if you deploy to serverless.
+- **On the server:** card-database lookups and prices are cached per card for 24 h (`lib/verify/index.ts`, `lib/pricing/index.ts`). JustTCG's free plan allows 100 requests a day and 1,000 a month, so this keeps repeat scans free. The cache lives in memory; swap in Redis/KV through the `TtlCache` interface in `lib/cache.ts` if you deploy to serverless.
 
 ## Setup
 
@@ -28,6 +29,7 @@ npm run dev                        # http://localhost:3000
 | Variable | Default | |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | none | required |
+| `JUSTTCG_API_KEY` | none | prices by condition; free key at justtcg.com |
 | `ANTHROPIC_MODEL` | `claude-opus-5-5` | |
 | `CACHE_TTL_MS` | `86400000` | server lookup cache TTL |
 | `RATE_LIMIT_PER_MINUTE` | `20` | per-IP limit on model calls |

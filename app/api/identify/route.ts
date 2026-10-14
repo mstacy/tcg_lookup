@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { identifyCard, IdentifyError } from "@/lib/claude";
 import { allowRequest } from "@/lib/rateLimit";
 import type { Identification, IdentifyResponse } from "@/lib/types";
+import { getPricing } from "@/lib/pricing";
 import { verifyCard } from "@/lib/verify";
 
 export const runtime = "nodejs";
@@ -45,9 +46,20 @@ export async function POST(req: NextRequest) {
 
   const fresh = req.nextUrl.searchParams.get("fresh") === "1";
   const verification = identification.isCard
-    ? await verifyCard(identification.game, identification.title, { fresh })
+    ? await verifyCard(identification.game, identification.title, {
+        fresh,
+        hints: { setCode: identification.setCode, collectorNumber: identification.collectorNumber },
+      })
     : null;
+  const { pricing, error: pricingError } = await getPricing(identification, verification, { fresh });
 
-  const response: IdentifyResponse = { identification, verification, cache: "none", scannedAt: Date.now() };
+  const response: IdentifyResponse = {
+    identification,
+    verification,
+    pricing,
+    pricingError,
+    cache: "none",
+    scannedAt: Date.now(),
+  };
   return NextResponse.json(response);
 }

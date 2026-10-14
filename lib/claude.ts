@@ -17,8 +17,8 @@ const IdentificationSchema = z.object({
     .describe("The card's printed name exactly as printed. Null if it cannot be read."),
   confidence: z.enum(["high", "medium", "low"]).describe("Confidence in the title reading."),
   cardType: z.string().nullable().describe("Type line or card category if legible, e.g. 'Legendary Creature — Elf'."),
-  setCode: z.string().nullable().describe("Set code if legible."),
-  collectorNumber: z.string().nullable().describe("Collector number if legible."),
+  setCode: z.string().nullable().describe("Set code if legible, e.g. 'M21' or 'MKM'."),
+  collectorNumber: z.string().nullable().describe("Collector number if legible, e.g. '123' or '045/271'."),
 });
 
 const SYSTEM_PROMPT = `You identify trading card game (TCG) cards from camera photos.
@@ -29,6 +29,8 @@ Layout hints:
 - Magic: The Gathering: name in the top-left of the frame bar, mana cost top-right, type line in the middle, set symbol right of the type line, collector number and set code bottom-left.
 - Cyberpunk TCG (Cyberpunk 2077 trading card game): the card name is the largest text; card types include Legends, Units, Gear and Programs.
 - Other games (Pokémon, Yu-Gi-Oh!, Lorcana, One Piece, Flesh and Blood, etc.) are fine. Name the game if you recognize it, otherwise return null for game.
+
+After the title, the set code and collector number matter most: they identify the exact printing, which determines the price. Read them if they're legible (they're usually small print along the bottom edge), but never guess them.
 
 If the image does not show a TCG card (e.g. a sports card, a book, a phone, an empty scene), set isCard to false and leave the other fields null.`;
 

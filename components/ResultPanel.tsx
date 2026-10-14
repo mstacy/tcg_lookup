@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import CardDetails, { CONDITION_ORDER, headlinePrice } from "./CardDetails";
 import type { IdentifyResponse } from "@/lib/types";
 
 type Props = {
@@ -11,6 +13,17 @@ type Props = {
   onSelect: (result: IdentifyResponse) => void;
 };
 
+const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const CONDITION_KEY = "tcg:condition";
+
+function loadCondition(): string {
+  try {
+    return localStorage.getItem(CONDITION_KEY) ?? CONDITION_ORDER[0];
+  } catch {
+    return CONDITION_ORDER[0];
+  }
+}
+
 const CONFIDENCE_STYLES = {
   high: "bg-emerald-500/15 text-emerald-300",
   medium: "bg-amber-500/15 text-amber-300",
@@ -20,6 +33,15 @@ const CONFIDENCE_STYLES = {
 export default function ResultPanel({ result, history, error, busy, onRescan, onSelect }: Props) {
   const id = result?.identification;
   const verification = result?.verification;
+  // Remembered across scans (and visits), since people tend to grade a stack the same way.
+  const [condition, setCondition] = useState(CONDITION_ORDER[0]);
+  useEffect(() => setCondition(loadCondition()), []);
+  const changeCondition = (c: string) => {
+    setCondition(c);
+    try {
+      localStorage.setItem(CONDITION_KEY, c);
+    } catch {}
+  };
 
   return (
     <section className="flex flex-col gap-4 overflow-y-auto p-4 md:p-5">
@@ -68,6 +90,8 @@ export default function ResultPanel({ result, history, error, busy, onRescan, on
                 >
                   ✓ {verification.source}
                 </a>
+              ) : result?.pricing?.exactName ? (
+                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300">✓ {result?.pricing.source}</span>
               ) : (
                 <span className="rounded-full bg-neutral-500/15 px-2 py-0.5 text-neutral-400">unverified</span>
               )}
@@ -75,16 +99,12 @@ export default function ResultPanel({ result, history, error, busy, onRescan, on
                 <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-violet-300">cached</span>
               )}
             </div>
-            {(id.cardType || id.setCode || verification?.setName) && (
-              <p className="text-sm text-neutral-400">
-                {[id.cardType, verification?.setName ?? id.setCode, id.collectorNumber && `#${id.collectorNumber}`]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            )}
+            {id.cardType && <p className="text-sm text-neutral-400">{id.cardType}</p>}
           </div>
         </div>
       )}
+
+      {id?.isCard && result && <CardDetails result={result} condition={condition} onConditionChange={changeCondition} />}
 
       {result && (
         <button
@@ -109,7 +129,9 @@ export default function ResultPanel({ result, history, error, busy, onRescan, on
                   <span className="truncate">
                     {h.verification?.name ?? h.identification.title ?? (h.identification.isCard ? "Unreadable" : "Not a card")}
                   </span>
-                  <span className="shrink-0 text-xs text-neutral-500">{h.identification.game ?? ""}</span>
+                  <span className="shrink-0 text-xs text-neutral-500 tabular-nums">
+                    {headlinePrice(h) !== null ? usd.format(headlinePrice(h)!) : (h.identification.game ?? "")}
+                  </span>
                 </button>
               </li>
             ))}
