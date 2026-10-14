@@ -7,6 +7,7 @@ import { detectCard, loadOpenCV, warpCard } from "@/lib/cardDetector";
 import { cacheScan, findCachedScan } from "@/lib/clientCache";
 import { extractFeatures } from "@/lib/cardMatcher";
 import { dHash } from "@/lib/fingerprint";
+import { OverlayRenderer } from "@/lib/overlay";
 import { StabilityTracker } from "@/lib/stability";
 import type { IdentifyResponse, Quad } from "@/lib/types";
 
@@ -14,6 +15,14 @@ const DETECT_WIDTH = 480;
 const DETECT_INTERVAL_MS = 150;
 const FALLBACK_MAX_SIDE = 1280;
 const HISTORY_SIZE = 10;
+const TIP_AFTER_MS = 4000;
+const TIP_INTERVAL_MS = 3000;
+const SEARCH_TIPS = [
+  "Move the card closer so it fills the frame",
+  "Try a plain, contrasting background",
+  "Keep fingers off the card's edges",
+  "Tilt the card to reduce glare",
+];
 
 type DetectorState = "loading" | "ready" | "failed";
 
@@ -141,7 +150,31 @@ export default function Scanner() {
     else capture(true);
   }, [identify, capture]);
 
-  // Detection loop: find the card, draw its outline, auto-capture when steady.
+  // Overlay animation runs from first paint, independent of the detector, so the
+  // guide frame gives feedback while OpenCV is still loading.
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    const renderer = new OverlayRenderer(overlay);
+    let frame = 0;
+    const render = (now: number) => {
+      frame = requestAnimationFrame(render);
+      const video = videoRef.current;
+      const quad = quadRef.current;
+      const scale = video?.videoWidth ? video.videoWidth / DETECT_WIDTH : 0;
+      const tracker = trackerRef.current;
+      renderer.draw(video, {
+        quad: quad && scale ? (quad.map((p) => ({ x: p.x * scale, y: p.y * scale })) as Quad) : null,
+        progress: tracker.progress,
+        locked: !tracker.isArmed,
+        busy: busyRef.current,
+      }, now);
+    };
+    frame = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  // Detection loop: find the card, track steadiness, auto-capture when steady.
   useEffect(() => {
     if (detector !== "ready") {
       setHint(detector === "loading" ? "Loading card detector…" : "Detector unavailable. Tap Scan to capture.");
@@ -150,6 +183,7 @@ export default function Scanner() {
     const detectCanvas = document.createElement("canvas");
     let timer: ReturnType<typeof setTimeout>;
     let lastHint = "";
+    let searchingSince = performance.now();
     const updateHint = (h: string) => {
       if (h !== lastHint) setHint((lastHint = h));
     };
@@ -157,8 +191,7 @@ export default function Scanner() {
     const tick = () => {
       timer = setTimeout(tick, DETECT_INTERVAL_MS);
       const video = videoRef.current;
-      const overlay = overlayRef.current;
-      if (!video || !overlay || document.hidden) return;
+      if (!video || document.hidden) return;
       if (!video.videoWidth) return updateHint("Waiting for camera…");
 
       const { videoWidth: vw, videoHeight: vh } = video;
@@ -173,13 +206,21 @@ export default function Scanner() {
         console.warn("detectCard failed", err);
       }
       quadRef.current = quad;
+      if (quad) searchingSince = performance.now();
 
       const tracker = trackerRef.current;
       const shouldCapture = !busyRef.current && tracker.update(quad);
-      drawOverlay(overlay, video, quad, tracker.progress);
 
       if (busyRef.current) updateHint("Identifying…");
-      else if (!quad) updateHint("Point the camera at a card");
+      else if (!quad) {
+        // After a while with nothing detected, rotate through tips instead of a static prompt.
+        const searching = performance.now() - searchingSince;
+        updateHint(
+          searching < TIP_AFTER_MS
+            ? "Place the card inside the frame"
+            : SEARCH_TIPS[Math.floor((searching - TIP_AFTER_MS) / TIP_INTERVAL_MS) % SEARCH_TIPS.length],
+        );
+      }
       else if (!tracker.isArmed) updateHint("Scanned. Show the next card.");
       else updateHint(autoScan ? "Hold steady…" : "Card found. Tap Scan.");
 
@@ -223,40 +264,4 @@ export default function Scanner() {
       </aside>
     </main>
   );
-}
-
-/** Draw the detected quad over the video, accounting for `object-cover` cropping. */
-function drawOverlay(overlay: HTMLCanvasElement, video: HTMLVideoElement, quad: Quad | null, progress: number) {
-  const dpr = window.devicePixelRatio || 1;
-  const cw = overlay.clientWidth;
-  const ch = overlay.clientHeight;
-  if (overlay.width !== Math.round(cw * dpr) || overlay.height !== Math.round(ch * dpr)) {
-    overlay.width = Math.round(cw * dpr);
-    overlay.height = Math.round(ch * dpr);
-  }
-  const ctx = overlay.getContext("2d")!;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cw, ch);
-  if (!quad) return;
-
-  const { videoWidth: vw, videoHeight: vh } = video;
-  const cover = Math.max(cw / vw, ch / vh);
-  const scale = (vw / DETECT_WIDTH) * cover;
-  const ox = (cw - vw * cover) / 2;
-  const oy = (ch - vh * cover) / 2;
-
-  ctx.beginPath();
-  quad.forEach((p, i) => {
-    const x = p.x * scale + ox;
-    const y = p.y * scale + oy;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.closePath();
-  const locked = progress >= 1;
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = locked ? "#34d399" : "#fbbf24";
-  ctx.fillStyle = locked ? "rgba(52, 211, 153, 0.15)" : `rgba(251, 191, 36, ${0.05 + progress * 0.1})`;
-  ctx.fill();
-  ctx.stroke();
 }
