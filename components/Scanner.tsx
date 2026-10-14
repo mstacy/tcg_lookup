@@ -44,6 +44,8 @@ export default function Scanner() {
   const quadRef = useRef<Quad | null>(null); // latest quad, in detection-canvas coordinates
   const busyRef = useRef(false);
   const lastCropRef = useRef<{ crop: HTMLCanvasElement; warped: boolean } | null>(null);
+  // The crop behind the latest shown result, for saving eval samples in development.
+  const resultCropRef = useRef<{ scannedAt: number; crop: HTMLCanvasElement } | null>(null);
 
   const [detector, setDetector] = useState<DetectorState>("loading");
   const [autoScan, setAutoScan] = useState(true);
@@ -65,7 +67,8 @@ export default function Scanner() {
       });
   }, []);
 
-  const showResult = useCallback((r: IdentifyResponse) => {
+  const showResult = useCallback((r: IdentifyResponse, crop?: HTMLCanvasElement) => {
+    if (crop) resultCropRef.current = { scannedAt: r.scannedAt, crop };
     setResult(r);
     setError(null);
     setHistory((prev) => [r, ...prev.filter((h) => h.scannedAt !== r.scannedAt)].slice(0, HISTORY_SIZE));
@@ -84,7 +87,7 @@ export default function Scanner() {
           fingerprint = { hash: dHash(crop), features: extractFeatures(cv, crop) };
           const cached = fresh ? null : findCachedScan(cv, fingerprint.hash, fingerprint.features);
           if (cached) {
-            showResult({ ...cached, scannedAt: Date.now() });
+            showResult({ ...cached, scannedAt: Date.now() }, crop);
             return;
           }
         } catch (err) {
@@ -109,7 +112,7 @@ export default function Scanner() {
         if (fingerprint && response.identification.isCard && response.identification.title && response.identification.confidence !== "low") {
           cacheScan(cv, fingerprint.hash, fingerprint.features, response);
         }
-        showResult(response);
+        showResult(response, crop);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Scan failed.");
       } finally {
@@ -260,7 +263,17 @@ export default function Scanner() {
       </div>
 
       <aside className="max-h-[45dvh] shrink-0 border-t border-neutral-800 bg-neutral-900 md:max-h-none md:w-96 md:border-l md:border-t-0">
-        <ResultPanel result={result} history={history} error={error} busy={busy} onRescan={rescan} onSelect={setResult} />
+        <ResultPanel
+          result={result}
+          history={history}
+          error={error}
+          busy={busy}
+          onRescan={rescan}
+          onSelect={setResult}
+          getSampleImage={(r) =>
+            resultCropRef.current?.scannedAt === r.scannedAt ? resultCropRef.current.crop.toDataURL("image/jpeg", 0.9).split(",")[1] : null
+          }
+        />
       </aside>
     </main>
   );

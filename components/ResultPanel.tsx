@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SampleSaver from "./SampleSaver";
 import CardDetails, { CONDITION_ORDER, displayName, headlinePrice } from "./CardDetails";
 import type { IdentifyResponse } from "@/lib/types";
 
@@ -11,6 +12,8 @@ type Props = {
   busy: boolean;
   onRescan: () => void;
   onSelect: (result: IdentifyResponse) => void;
+  /** Crop behind a result, for saving eval samples (development only). */
+  getSampleImage?: (result: IdentifyResponse) => string | null;
 };
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
@@ -30,7 +33,7 @@ const CONFIDENCE_STYLES = {
   low: "bg-red-500/15 text-red-300",
 };
 
-export default function ResultPanel({ result, history, error, busy, onRescan, onSelect }: Props) {
+export default function ResultPanel({ result, history, error, busy, onRescan, onSelect, getSampleImage }: Props) {
   const id = result?.identification;
   const match = result?.match;
   const shownName = result ? displayName(result) : null;
@@ -88,6 +91,10 @@ export default function ResultPanel({ result, history, error, busy, onRescan, on
       )}
 
       {id?.isCard && result && <CardDetails result={result} condition={condition} onConditionChange={changeCondition} />}
+
+      {process.env.NODE_ENV !== "production" && result && getSampleImage && (
+        <SampleSaver key={result.scannedAt} result={result} getImage={() => getSampleImage(result)} />
+      )}
 
       {result && (
         <button

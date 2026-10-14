@@ -60,6 +60,13 @@ type Usage = {
   cache_creation_input_tokens?: number | null;
 };
 
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export type CallOptions = { model?: string; effort?: Effort };
+
+export type UsageRecord = { label: string; model: string; usage: Usage; cost: number | null };
+/** Every call's usage, for scripts (e.g. the eval) that need measured cost. Capped. */
+export const usageLog: UsageRecord[] = [];
+
 /** Log token usage and estimated cost per call, so cost per scan is measured, not guessed. */
 function logUsage(label: string, model: string, usage: Usage) {
   const read = usage.cache_read_input_tokens ?? 0;
@@ -68,6 +75,8 @@ function logUsage(label: string, model: string, usage: Usage) {
   const cost = rates
     ? (usage.input_tokens * rates[0] + usage.output_tokens * rates[1] + read * rates[2] + write * rates[3]) / 1e6
     : null;
+  usageLog.push({ label, model, usage, cost });
+  if (usageLog.length > 1000) usageLog.shift();
   console.log(
     `[claude] ${label} ${model} in=${usage.input_tokens} out=${usage.output_tokens} cache_read=${read} cache_write=${write}` +
       (cost !== null ? ` cost=${cost.toFixed(5)}` : ""),
@@ -83,13 +92,13 @@ export class IdentifyError extends Error {
   }
 }
 
-export async function identifyCard(jpegBase64: string): Promise<Identification> {
+export async function identifyCard(jpegBase64: string, opts: CallOptions = {}): Promise<Identification> {
   const response = await client.beta.messages.parse({
-    model: MODEL,
+    model: opts.model ?? MODEL,
     max_tokens: 4096,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
-    output_config: { effort: "low", format: betaZodOutputFormat(IdentificationSchema) },
+    output_config: { effort: opts.effort ?? "low", format: betaZodOutputFormat(IdentificationSchema) },
     // The prompt + output schema (~1,650 tokens) is identical on every scan: cache it.
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     messages: [
@@ -130,6 +139,7 @@ export async function chooseCandidate(
   jpegBase64: string,
   candidates: CardPrinting[],
   thumbnails: (string | null)[] = [],
+  opts: CallOptions = {},
 ): Promise<string | null> {
   const ids = candidates.map((c) => c.id);
   const Choice = z.object({
@@ -152,11 +162,11 @@ export async function chooseCandidate(
   content.push({ type: "text", text: "Which candidate is the photographed card?" });
 
   const response = await client.beta.messages.parse({
-    model: CHOOSER_MODEL,
+    model: opts.model ?? CHOOSER_MODEL,
     max_tokens: 2048,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
-    output_config: { effort: "low", format: betaZodOutputFormat(Choice) },
+    output_config: { effort: opts.effort ?? "low", format: betaZodOutputFormat(Choice) },
     system: CHOOSER_PROMPT,
     messages: [{ role: "user", content }],
   });
