@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TCG Lookup
 
-## Getting Started
+Point a laptop or phone camera at a trading card to identify the game and read the card's title.
 
-First, run the development server:
+## How it works
+
+1. **In-browser detection (OpenCV.js):** finds the card's outline in the live feed, waits until it's held steady, then perspective-corrects the card into a flat 630×880 crop.
+2. **Identification (`/api/identify`):** sends the crop to Claude (`claude-opus-5-5`, structured output), which returns `isCard`, `game`, and `title`.
+3. **Verification:** Magic: The Gathering titles are fuzzy-matched against Scryfall. Cyberpunk TCG has no public card API, so its titles are shown unverified. To add another game, register a verifier in `lib/verify/index.ts`.
+
+## 24-hour caching
+
+- **On the device:** each scan is fingerprinted with ORB keypoints (`lib/cardMatcher.ts`) and kept in localStorage for 24 h. Rescanning the same card is answered instantly with no server call. "Rescan (skip cache)" forces a fresh read and replaces the cached entry.
+- **On the server:** card-database lookups are cached by game and normalized title for 24 h, misses included (`lib/verify/index.ts`). The cache lives in memory; swap in Redis/KV through the `TtlCache` interface in `lib/cache.ts` if you deploy to serverless.
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.local.example .env.local   # add your ANTHROPIC_API_KEY
+npm install
+npm run dev                        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**On a phone:** cameras only work over HTTPS. Run `npm run dev:https` and open `https://<your-lan-ip>:3000` on the phone, accepting the self-signed certificate. Or deploy to Vercel.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Config (`.env.local`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Variable | Default | |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | none | required |
+| `ANTHROPIC_MODEL` | `claude-opus-5-5` | |
+| `CACHE_TTL_MS` | `86400000` | server lookup cache TTL |
+| `RATE_LIMIT_PER_MINUTE` | `20` | per-IP limit on model calls |
+| `NEXT_PUBLIC_OPENCV_URL` | jsDelivr `@techstark/opencv-js@4.10.0-release.1` | self-host to avoid the CDN |
+# tcg_lookup
