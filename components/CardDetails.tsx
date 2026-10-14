@@ -20,6 +20,14 @@ function timeAgo(unixSeconds: number) {
   return `${Math.round(hours / 24)} days ago`;
 }
 
+/** Best name for a scan: the verified name, else what was read ("Name - Subtitle"). */
+export function displayName(result: IdentifyResponse): string | null {
+  const { verification, identification: id } = result;
+  if (verification) return verification.name;
+  if (!id.title) return null;
+  return id.subtitle ? `${id.title} - ${id.subtitle}` : id.title;
+}
+
 /** Near Mint price of a printing's default finish, for compact displays like scan history. */
 export function headlinePrice(result: IdentifyResponse): number | null {
   const variants = result.pricing?.printings[0]?.variants ?? [];
@@ -55,6 +63,8 @@ export default function CardDetails({ result, condition, onConditionChange }: Pr
   const activeCondition = conditions.includes(condition) ? condition : conditions[0];
   const variant = printing?.variants.find((v) => v.printing === finish && v.condition === activeCondition);
 
+  // When the candidates are different cards (e.g. same character, other subtitles), say which.
+  const namesDiffer = new Set(printings.map((p) => p.name)).size > 1;
   const setName = printing?.setName ?? verification?.setName ?? identification.setCode;
   const number = printing?.number ?? verification?.number ?? identification.collectorNumber;
   const rarity = printing?.rarity ?? verification?.rarity;
@@ -62,6 +72,12 @@ export default function CardDetails({ result, condition, onConditionChange }: Pr
   return (
     <div className="flex flex-col gap-3">
       <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
+        {namesDiffer && printing && (
+          <>
+            <dt className="text-neutral-500">Card</dt>
+            <dd className="text-neutral-100">{printing.name}</dd>
+          </>
+        )}
         <dt className="text-neutral-500">Set</dt>
         <dd className="min-w-0">
           {printings.length > 1 ? (
@@ -73,7 +89,7 @@ export default function CardDetails({ result, condition, onConditionChange }: Pr
             >
               {printings.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {[p.setName ?? "Unknown set", p.number && `#${p.number}`].filter(Boolean).join(" · ")}
+                  {[namesDiffer && p.name, p.setName ?? "Unknown set", p.number && `#${p.number}`].filter(Boolean).join(" · ")}
                 </option>
               ))}
             </select>

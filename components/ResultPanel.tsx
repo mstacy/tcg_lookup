@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import CardDetails, { CONDITION_ORDER, headlinePrice } from "./CardDetails";
+import CardDetails, { CONDITION_ORDER, displayName, headlinePrice } from "./CardDetails";
 import type { IdentifyResponse } from "@/lib/types";
 
 type Props = {
@@ -73,7 +73,7 @@ export default function ResultPanel({ result, history, error, busy, onRescan, on
           )}
           <div className="flex min-w-0 flex-col gap-2">
             <h2 className="text-2xl font-bold leading-tight break-words">
-              {verification?.name ?? id.title ?? "Title unreadable"}
+              {(result && displayName(result)) ?? "Title unreadable"}
             </h2>
             {verification && id.title && verification.name.toLowerCase() !== id.title.toLowerCase() && (
               <p className="text-xs text-neutral-400">Read as “{id.title}”</p>
@@ -127,7 +127,7 @@ export default function ResultPanel({ result, history, error, busy, onRescan, on
                   className="flex w-full items-baseline justify-between gap-2 rounded px-2 py-1 text-left text-sm hover:bg-neutral-800"
                 >
                   <span className="truncate">
-                    {h.verification?.name ?? h.identification.title ?? (h.identification.isCard ? "Unreadable" : "Not a card")}
+                    {displayName(h) ?? (h.identification.isCard ? "Unreadable" : "Not a card")}
                   </span>
                   <span className="shrink-0 text-xs text-neutral-500 tabular-nums">
                     {headlinePrice(h) !== null ? usd.format(headlinePrice(h)!) : (h.identification.game ?? "")}

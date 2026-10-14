@@ -7,6 +7,8 @@ export type Identification = {
   isCard: boolean;
   game: string | null;
   title: string | null;
+  /** Subtitle/epithet printed with the name (Cyberpunk TCG, Lorcana), if any. */
+  subtitle: string | null;
   confidence: "high" | "medium" | "low";
   cardType: string | null;
   setCode: string | null;

@@ -15,6 +15,10 @@ const IdentificationSchema = z.object({
     .string()
     .nullable()
     .describe("The card's printed name exactly as printed. Null if it cannot be read."),
+  subtitle: z
+    .string()
+    .nullable()
+    .describe("Subtitle or epithet printed with the name, if the card has one (e.g. Cyberpunk TCG: 'Mama's Favorite'). Null otherwise."),
   confidence: z.enum(["high", "medium", "low"]).describe("Confidence in the title reading."),
   cardType: z.string().nullable().describe("Type line or card category if legible, e.g. 'Legendary Creature — Elf'."),
   setCode: z.string().nullable().describe("Set code if legible, e.g. 'M21' or 'MKM'."),
@@ -27,7 +31,7 @@ The most important output is the card's title: its printed name, usually the lar
 
 Layout hints:
 - Magic: The Gathering: name in the top-left of the frame bar, mana cost top-right, type line in the middle, set symbol right of the type line, collector number and set code bottom-left.
-- Cyberpunk TCG (Cyberpunk 2077 trading card game): the card name is the largest text; card types include Legends, Units, Gear and Programs.
+- Cyberpunk TCG (Cyberpunk 2077 trading card game): the card name is the largest text, usually with a smaller subtitle (epithet) next to or under it, e.g. "Jackie Welles" / "Mama's Favorite". Return the name as the title and the epithet as the subtitle. Card types include Legends, Units, Gear and Programs.
 - Other games (Pokémon, Yu-Gi-Oh!, Lorcana, One Piece, Flesh and Blood, etc.) are fine. Name the game if you recognize it, otherwise return null for game.
 
 After the title, the set code and collector number matter most: they identify the exact printing, which determines the price. Read them if they're legible (they're usually small print along the bottom edge), but never guess them.
