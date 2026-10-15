@@ -1,0 +1,66 @@
+# Weekly check for new Cyberpunk TCG cards. Costs 1 JustTCG request when nothing changed;
+# when a set is added or changes size it re-syncs the snapshot (~32 requests) and opens a
+# pull request listing the added/removed cards. Merging it deploys the new catalog.
+#
+# Setup: add the JUSTTCG_API_KEY repository secret, and enable
+# Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests".
+name: Sync card catalog
+
+on:
+  schedule:
+    - cron: "0 10 * * 1" # Mondays 10:00 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-sync even if the set list looks unchanged"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-catalog
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Check for catalog changes and sync
+        env:
+          JUSTTCG_API_KEY: ${{ secrets.JUSTTCG_API_KEY }}
+          MODE: ${{ inputs.force && '--force' || '--check' }}
+        run: npx tsx scripts/sync-catalog.ts cyberpunk-tcg $MODE --summary "$RUNNER_TEMP/catalog-changes.md"
+
+      - name: Open or update a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- data/catalog; then
+            echo "Catalog unchanged."
+            exit 0
+          fi
+          branch="catalog-sync/cyberpunk-tcg"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add data/catalog
+          git commit -m "Sync Cyberpunk TCG catalog ($(date -u +%Y-%m-%d))"
+          git push --force -u origin "$branch"
+          title="Cyberpunk TCG catalog update ($(date -u +%Y-%m-%d))"
+          if gh pr view "$branch" --json state -q .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$branch" --title "$title" --body-file "$RUNNER_TEMP/catalog-changes.md"
+          else
+            gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/catalog-changes.md"
+          fi
+          cat "$RUNNER_TEMP/catalog-changes.md" >> "$GITHUB_STEP_SUMMARY"

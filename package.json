@@ -33,6 +33,7 @@
     "eslint-config-next": "^15.5.27",
     "playwright-core": "^1.49.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^3.2.4"
   }
