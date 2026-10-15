@@ -20,8 +20,6 @@ type Snapshot = {
 
 const SNAPSHOTS: Record<string, Snapshot> = { "cyberpunk-tcg": cyberpunk as Snapshot };
 
-export const SNAPSHOT_GAMES = Object.keys(SNAPSHOTS);
-
 export function hasSnapshot(gameId: string): boolean {
   return gameId in SNAPSHOTS;
 }
@@ -47,37 +45,41 @@ export function snapshotPrintings(gameId: string): CardPrinting[] {
   }));
 }
 
-type PriceMap = Record<string, PriceVariant[]>;
-
-// One map per game, refreshed at most once a day: ~3 batch requests price the whole game,
-// so individual scans cost no JustTCG requests at all.
-const priceMaps = namedCache<PriceMap>("snapshot-prices");
-
-export async function refreshPriceMap(gameId: string): Promise<PriceMap> {
-  const cards = await cardsByIds(SNAPSHOTS[gameId].cards.map((c) => c.id));
-  const map: PriceMap = Object.fromEntries(cards.map((c) => [c.id, englishVariants(c.variants)]));
-  await priceMaps.set(gameId, map);
-  return map;
-}
+// Per-card prices, cached for a day (shared across instances with Redis). A scan prices
+// only its candidates, in one batch request, and only those not already priced today.
+const cardPrices = namedCache<PriceVariant[]>("card-prices");
 
 /**
  * Attach current prices to snapshot printings. Falls back to the snapshot's own prices
  * ("as of" its sync date) when there's no key or JustTCG is unavailable.
  */
 export async function priceSnapshotPrintings(gameId: string, printings: CardPrinting[]): Promise<{ printings: CardPrinting[]; error: string | null }> {
-  if (!hasJustTcgKey()) return { printings, error: null };
-  let map = await priceMaps.get(gameId);
+  if (!hasJustTcgKey() || !printings.length) return { printings, error: null };
+
+  const prices = new Map<string, PriceVariant[]>();
+  const cached = await Promise.all(printings.map((p) => cardPrices.get(p.id)));
+  printings.forEach((p, i) => cached[i] && prices.set(p.id, cached[i]!));
+
+  const missing = printings.filter((p) => !prices.has(p.id)).map((p) => p.id);
   let error: string | null = null;
-  if (!map) {
+  if (missing.length) {
     try {
-      map = await refreshPriceMap(gameId);
+      const cards = await cardsByIds(missing);
+      await Promise.all(
+        cards.map((c) => {
+          const variants = englishVariants(c.variants);
+          prices.set(c.id, variants);
+          return cardPrices.set(c.id, variants);
+        }),
+      );
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
   }
-  if (!map) return { printings, error };
+
   return {
-    printings: printings.map((p) => (map![p.id] ? { ...p, variants: map![p.id], priceAsOf: null } : p)),
-    error: null,
+    printings: printings.map((p) => (prices.has(p.id) ? { ...p, variants: prices.get(p.id)!, priceAsOf: null } : p)),
+    // Snapshot prices still show, so only report an error when nothing could be priced.
+    error: prices.size ? null : error,
   };
 }

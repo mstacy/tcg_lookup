@@ -1,6 +1,6 @@
 /**
  * The shared-cache path: Upstash Redis (mocked at its REST protocol), the shared rate
- * limiter, and the daily price-refresh cron.
+ * limiter, and per-card prices shared across server instances.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JUSTTCG_CARDS } from "./mockApis";
@@ -71,7 +71,6 @@ async function freshInstance() {
     cache: await import("@/lib/cache"),
     rateLimit: await import("@/lib/rateLimit"),
     snapshot: await import("@/lib/catalog/snapshot"),
-    cron: await import("@/app/api/cron/refresh-prices/route"),
   };
 }
 
@@ -82,7 +81,6 @@ beforeEach(() => {
   process.env.UPSTASH_REDIS_REST_URL = "https://redis.test";
   process.env.UPSTASH_REDIS_REST_TOKEN = "token";
   process.env.JUSTTCG_API_KEY = "test-key";
-  process.env.CRON_SECRET = "s3cret";
   installMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -147,30 +145,17 @@ describe("shared rate limiter", () => {
   });
 });
 
-describe("daily price refresh cron", () => {
-  const call = async (cron: Awaited<ReturnType<typeof freshInstance>>["cron"], auth?: string) => {
-    const { NextRequest } = await import("next/server");
-    return cron.GET(new NextRequest("http://localhost/api/cron/refresh-prices", { headers: auth ? { authorization: auth } : {} }));
-  };
+describe("shared card prices", () => {
+  it("prices a card once per day across every server instance", async () => {
+    const a = await freshInstance();
+    const cards = a.snapshot.snapshotPrintings("cyberpunk-tcg").slice(0, 5);
+    const first = await a.snapshot.priceSnapshotPrintings("cyberpunk-tcg", cards);
+    expect(justtcgCalls).toEqual(["POST /v1/cards"]);
+    expect(first.printings.every((p) => p.priceAsOf === null)).toBe(true);
 
-  it("rejects requests without the cron secret", async () => {
-    const { cron } = await freshInstance();
-    expect((await call(cron)).status).toBe(401);
-    expect((await call(cron, "Bearer wrong")).status).toBe(401);
-    expect(justtcgCalls).toHaveLength(0);
-  });
-
-  it("prices whole snapshot games in batches, then scans on any instance cost nothing", async () => {
-    const { cron } = await freshInstance();
-    const res = await call(cron, "Bearer s3cret");
-    expect(res.status).toBe(200);
-    expect((await res.json()).refreshed["cyberpunk-tcg"]).toBe(453);
-    expect(justtcgCalls).toEqual(["POST /v1/cards", "POST /v1/cards", "POST /v1/cards"]);
-
-    const other = await freshInstance();
-    const printings = other.snapshot.snapshotPrintings("cyberpunk-tcg").slice(0, 3);
-    const { printings: priced } = await other.snapshot.priceSnapshotPrintings("cyberpunk-tcg", printings);
-    expect(justtcgCalls).toHaveLength(3);
-    expect(priced.every((p) => p.priceAsOf === null)).toBe(true);
+    const b = await freshInstance();
+    const again = await b.snapshot.priceSnapshotPrintings("cyberpunk-tcg", b.snapshot.snapshotPrintings("cyberpunk-tcg").slice(0, 5));
+    expect(justtcgCalls).toHaveLength(1);
+    expect(again.printings.map((p) => p.variants)).toEqual(first.printings.map((p) => p.variants));
   });
 });

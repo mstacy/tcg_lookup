@@ -11,20 +11,18 @@ Point a laptop or phone camera at a trading card to identify the game and read t
    - Cyberpunk TCG: a snapshot of the whole JustTCG catalog in `data/catalog/`, matched locally.
    - Other JustTCG games: a name search.
 4. **Choosing (only when ambiguous):** if several printings fit, Claude sees the photo together with the candidates (and their images, for Magic) and picks one by id. Otherwise the best-ranked candidates stay in the set dropdown.
-5. **Pricing ([JustTCG](https://justtcg.com)):** TCGplayer market prices for every condition and finish. Magic prices the matched printing by Scryfall id; Cyberpunk prices come from one daily batch for the whole game, so scans cost no JustTCG requests. Picking another printing in the dropdown fetches its prices (`/api/price`). Without a `JUSTTCG_API_KEY`, Magic shows Scryfall's Near Mint price and Cyberpunk shows the snapshot's prices.
+5. **Pricing ([JustTCG](https://justtcg.com)):** TCGplayer market prices for every condition and finish. Magic prices the matched printing by Scryfall id; Cyberpunk prices a scan's candidates (up to 8) in one batch request, and each card's prices are cached for a day, so a card already priced today costs nothing. Picking another printing in the dropdown fetches its prices (`/api/price`). Without a `JUSTTCG_API_KEY`, Magic shows Scryfall's Near Mint price and Cyberpunk shows the snapshot's prices.
 
 ## 24-hour caching
 
 - **On the device:** each scan is fingerprinted with ORB keypoints (`lib/cardMatcher.ts`) and kept in localStorage for 24 h. Rescanning the same card is answered instantly with no server call. "Rescan (skip cache)" forces a fresh read and replaces the cached entry.
 - **On the server:** catalog lookups and prices are cached for 24 h (`lib/catalog/`, `lib/pricing/`). JustTCG's free plan allows 100 requests a day and 1,000 a month, so this keeps repeat scans free.
   - With Upstash Redis configured (`UPSTASH_REDIS_REST_URL`/`TOKEN`, or Vercel's `KV_REST_API_URL`/`TOKEN`), the cache and the per-IP rate limit are shared by every server instance. Without it, each instance keeps its own in-memory cache.
-  - A daily Vercel cron (`vercel.json` → `/api/cron/refresh-prices`, protected by `CRON_SECRET`) re-prices the snapshot games in 3 batch requests, so Cyberpunk scans never wait on JustTCG.
 
 ## Deploying to Vercel
 
 1. Add the environment variables below in the Vercel project settings.
 2. Add Upstash Redis from the Vercel Marketplace (Storage → Upstash, free tier is plenty); it sets the `KV_REST_API_*` variables for you.
-3. Set `CRON_SECRET` to any long random string; Vercel sends it to the cron route automatically.
 
 ## Setup
 
@@ -56,6 +54,6 @@ npm run dev                        # http://localhost:3000
 | `CACHE_TTL_MS` | `86400000` | server lookup cache TTL |
 | `RATE_LIMIT_PER_MINUTE` | `20` | per-IP limit on model calls |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | none | shared cache and rate limit (or `KV_REST_API_URL` / `_TOKEN`) |
-| `CRON_SECRET` | none | protects the daily price-refresh cron |
+| `JUSTTCG_BATCH_SIZE` | `20` | cards per JustTCG batch request (20 on the free plan) |
 | `NEXT_PUBLIC_OPENCV_URL` | `/vendor/opencv-4.10.0.js` | override where OpenCV.js loads from |
 # tcg_lookup

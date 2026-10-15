@@ -1,7 +1,8 @@
 import type { CardPrinting, PriceVariant } from "../types";
 
 const BASE_URL = "https://api.justtcg.com/v1";
-const BATCH_SIZE = 200;
+// Max cards per batch request: 20 on the free plan (paid plans allow more).
+const BATCH_SIZE = Number(process.env.JUSTTCG_BATCH_SIZE ?? 20);
 
 /** A pricing failure with a message that is safe to show to the user. */
 export class PricingError extends Error {}
@@ -101,7 +102,7 @@ export async function cardBy(id: { scryfallId: string } | { cardId: string }): P
   return res.data[0] ?? null;
 }
 
-/** Many cards by JustTCG card id, 200 per request (a whole small game in a few requests). */
+/** Many cards by JustTCG card id, in batches of BATCH_SIZE per request. */
 export async function cardsByIds(cardIds: string[]): Promise<ApiCard[]> {
   const out: ApiCard[] = [];
   for (let i = 0; i < cardIds.length; i += BATCH_SIZE) {

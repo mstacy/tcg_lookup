@@ -59,14 +59,25 @@ describe("Magic", () => {
 });
 
 describe("Cyberpunk TCG (snapshot)", () => {
-  it("prices the whole game with one daily batch, then scans cost no requests", async () => {
-    await priced("Cyberpunk TCG", "Jackie Welles", { subtitle: "Mama's Favorite", collectorNumber: "007" });
-    const batches = justtcgCalls();
-    expect(batches.every((c) => c.startsWith("justtcg POST"))).toBe(true);
-    expect(batches.length).toBe(3); // 453 cards / 200 per batch
+  it("prices a scan's candidates in one batch request, then repeat scans cost nothing", async () => {
     const { printings } = await priced("Cyberpunk TCG", "Jackie Welles");
-    expect(justtcgCalls()).toHaveLength(3);
-    expect(printings[0].priceAsOf).toBeNull(); // fresh prices, not the snapshot's
+    expect(justtcgCalls()).toEqual([expect.stringMatching(/^justtcg POST \/v1\/cards/)]);
+    expect(printings.length).toBeGreaterThan(3);
+    expect(printings.every((x) => x.priceAsOf === null)).toBe(true); // fresh prices, not the snapshot's
+    await priced("Cyberpunk TCG", "Jackie Welles", { subtitle: "Mama's Favorite", collectorNumber: "007" });
+    expect(justtcgCalls()).toHaveLength(1); // its candidate was already priced today
+  });
+
+  it("never sends more than 20 cards per batch (free-plan limit)", async () => {
+    const { cardsByIds } = await import("@/lib/pricing/justtcg");
+    const sizes: number[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") sizes.push(JSON.parse(String(init.body)).length);
+      return realFetch(input, init);
+    });
+    await cardsByIds(Array.from({ length: 45 }, (_, i) => `card-${i}`));
+    expect(sizes).toEqual([20, 20, 5]);
   });
 
   it("falls back to the snapshot's prices, labeled with their date, when JustTCG fails", async () => {
